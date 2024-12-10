@@ -1,0 +1,120 @@
+Metadata-Version: 2.1
+Name: streamlit-markdown
+Version: 1.0.9
+Summary: A Streamlit component to display markdown, which supports table, code switch, LaTeX, mermaid, and more.
+Home-page: https://github.com/LinXueyuanStdio/streamlit-markdown
+License: MIT
+Author: Xueyuan Lin
+Author-email: linxy59@mail2.sysu.eud.cn
+Requires-Python: >=3.8, !=2.7.*, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, !=3.5.*, !=3.6.*, !=3.7.*
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Dist: streamlit (>=0.63)
+Description-Content-Type: text/markdown
+
+# streamlit-markdown
+
+react-markdown with streaming support for streamlit webapp.
+
+![](./docs/streamlit-markdown.gif)
+
+- [x] streaming rendering of markdown text
+- [x] support for latex math, mermaid diagrams, code highlighting
+- [x] support for tables, images, links
+
+> Have a try at https://streaming-markdown.streamlit.app/
+
+![](./docs/screenshot.png)
+
+## Installation
+
+```bash
+pip install streamlit-markdown
+```
+
+## Usage
+
+static content:
+
+```python
+from streamlit_markdown import st_markdown
+
+markdown_text = "$ y = f(x)$"
+st_markdown(markdown_text)
+```
+
+streaming content:
+
+```python
+from streamlit_markdown import st_streaming_markdown
+
+markdown_text = "$ y = f(x)$"
+def token_stream():
+    for token in markdown_text:
+        yeild token
+st_streaming_markdown(token_stream, key="token_stream") # key must be set to prevent re-rendering
+```
+
+combined streaming content:
+
+```python
+from streamlit_markdown import st_streaming_markdown
+
+markdown_text = "$ y = f(x)$"
+def token_stream():
+    import random
+    for token in markdown_text:
+        if random.rand() > 0.5:
+            yeild token
+        else:
+            def callable_token():
+                return token
+            yeild callable_token
+st_streaming_markdown(token_stream, key="token_stream") # key must be set to prevent re-rendering
+```
+
+run example:
+
+```bash
+streamlit run example.py
+```
+
+![img.png](./docs/a.png)
+![img.png](./docs/b.png)
+
+## Advanced Usage
+
+Style Customization
+
+there are two ways to custom the color 
+
+## Building from source
+
+### Prerequisites
+
+- nodejs >= 18.x
+- yarn >= 1.22.x
+- poetry >= 1.2.x
+- python >= 3.8.x
+
+### Building
+
+```bash
+./build.sh
+```
+
+### Publishing
+
+```bash
+poetry publish
+```
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details
+
