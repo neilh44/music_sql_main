@@ -25,7 +25,7 @@ const JourneyUI: React.FC = () => {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   
-  const BACKEND_URL = "https://valet-server-rnz0tb7x1-neilh44s-projects.vercel.app/query";
+  const BACKEND_URL = "http://127.0.0.1:5000/query";
 
   useEffect(() => {
     if (chatContainerRef.current) {
