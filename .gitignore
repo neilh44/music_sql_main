@@ -42,4 +42,4 @@ ENV/
 *.sqlite3
 
 # Vercel
-.vercel
+.vercelvalet.server
