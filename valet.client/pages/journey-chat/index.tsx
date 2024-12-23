@@ -1,6 +1,7 @@
+// JourneyUI/index.tsx
 import React, { useState, useRef, useEffect } from "react";
-import { Mountain, Image, MoreVertical, Share2, Camera, Video, Paperclip } from 'lucide-react';
 import DataVisualization from "@/components/ui/DataVisualization";
+
 
 interface ChatMessage {
   id: number;
@@ -10,12 +11,20 @@ interface ChatMessage {
 }
 
 interface BackendResponse {
-  query_results?: number[][];
-  nl_explanation?: string;
-  error?: string;
-  entities?: Array<{text: string; label: string}>;
-  columns?: string[];
   success?: boolean;
+  session_id?: string;
+  results?: (string | number)[][];
+  explanation?: string;
+  error?: string;
+  columns?: string[];
+  context_used?: boolean;
+  context_analysis?: {
+    patterns: string[];
+    topic_focus: string[] | null;
+    interaction_count: number;
+    has_visualizations: boolean;
+  };
+  sql_query?: string;
 }
 
 const JourneyUI: React.FC = () => {
@@ -23,29 +32,35 @@ const JourneyUI: React.FC = () => {
   const [responseData, setResponseData] = useState<BackendResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [sessionId, setSessionId] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
-  
-  const BACKEND_URL = "http://127.0.0.1:5000/query";
 
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://valet-server-lqdsoabfv-neilh44s-projects.vercel.app';
+  
   useEffect(() => {
+    const storedSessionId = localStorage.getItem('querySessionId');
+    if (storedSessionId) {
+      setSessionId(storedSessionId);
+    }
+
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [chatHistory, isLoading]);
 
-  const transformDataForVisualization = (
-    results: number[][] | undefined,
-    columns: string[] | undefined
-  ): string[][] => {
-    if (!results?.[0] || !columns) return [];
-    return [
-      results[0].map(val => val.toString()),
-      columns
-    ];
+  const handleApiError = (error: any) => {
+    const errorMessage = error?.response?.data?.error || error.message || "An error occurred";
+    setError(errorMessage);
+    return {
+      success: false,
+      error: errorMessage
+    };
   };
 
   const callBackendAPI = async (userInput: string) => {
     setIsLoading(true);
+    setError(null);
     
     const userMessage: ChatMessage = {
       id: Date.now(),
@@ -55,39 +70,83 @@ const JourneyUI: React.FC = () => {
     setChatHistory(prev => [...prev, userMessage]);
 
     try {
-      const response = await fetch(BACKEND_URL, {
+      const response = await fetch(`${API_BASE_URL}/query`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ query: userInput }),
+        body: JSON.stringify({ 
+          query: userInput,
+          session_id: sessionId 
+        }),
       });
-  
+
       if (!response.ok) {
         throw new Error(`API request failed with status ${response.status}`);
       }
-  
+
       const data: BackendResponse = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to process query');
+      }
+
       setResponseData(data);
 
-      if (data.nl_explanation) {
-        const systemMessage: ChatMessage = {
-          id: Date.now() + 1,
-          type: 'system',
-          content: data.nl_explanation,
-          responseData: data
-        };
-        setChatHistory(prev => [...prev, systemMessage]);
+      if (data.session_id && data.session_id !== sessionId) {
+        localStorage.setItem('querySessionId', data.session_id);
+        setSessionId(data.session_id);
       }
-    } catch (error) {
-      console.error("Error calling backend:", error);
+
+      const systemMessage: ChatMessage = {
+        id: Date.now() + 1,
+        type: 'system',
+        content: data.explanation || 'Query processed successfully',
+        responseData: data
+      };
+      setChatHistory(prev => [...prev, systemMessage]);
+    } catch (error: any) {
+      const errorResponse = handleApiError(error);
       const errorMessage: ChatMessage = {
         id: Date.now(),
         type: 'system',
-        content: "An error occurred. Please try again."
+        content: errorResponse.error
       };
       setChatHistory(prev => [...prev, errorMessage]);
-      setResponseData({ error: "An error occurred. Please try again." });
+      setResponseData({ error: errorResponse.error });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const clearChat = async () => {
+    if (!sessionId) return;
+
+    try {
+      setIsLoading(true);
+      const response = await fetch(`${API_BASE_URL}/clear-context`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to clear chat');
+      }
+
+      localStorage.removeItem('querySessionId');
+      setSessionId('');
+      setResponseData(null);
+      setChatHistory([]);
+      setError(null);
+    } catch (error: any) {
+      handleApiError(error);
     } finally {
       setIsLoading(false);
     }
@@ -101,13 +160,42 @@ const JourneyUI: React.FC = () => {
     }
   };
 
+  const transformDataForVisualization = (message: ChatMessage) => {
+    if (!message.responseData?.results || !message.responseData?.columns) {
+      return null;
+    }
+
+    return {
+      results: message.responseData.results,
+      columns: message.responseData.columns,
+      explanation: message.responseData.explanation
+    };
+  };
+
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       <header className="flex-none border-b p-4">
-        <h1 className="text-xl font-semibold text-green-500">Summon Parking Valet</h1>
+        <div className="flex justify-between items-center">
+          <h1 className="text-xl font-semibold text-green-500">Summon Parking Valet</h1>
+          {sessionId && (
+            <button
+              onClick={clearChat}
+              disabled={isLoading}
+              className="px-4 py-2 text-sm bg-red-500 text-white rounded-md disabled:opacity-50 hover:bg-red-600"
+            >
+              Clear Chat
+            </button>
+          )}
+        </div>
       </header>
       
       <main className="flex-1 overflow-hidden flex flex-col">
+        {error && (
+          <div className="m-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-md">
+            {error}
+          </div>
+        )}
+
         <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
           {chatHistory.map((message) => (
             <div key={message.id}>
@@ -121,19 +209,22 @@ const JourneyUI: React.FC = () => {
                 </div>
               </div>
               
-              {message.type === 'system' && message.responseData?.query_results && (
+              {message.type === 'system' && message.responseData && (
                 <div className="mt-4">
-                  <DataVisualization
-                    data={transformDataForVisualization(
-                      message.responseData.query_results,
-                      message.responseData.columns
-                    )}
-                  />
+                  {transformDataForVisualization(message) && (
+                    <DataVisualization 
+                      data={transformDataForVisualization(message)!}
+                    />
+                  )}
                 </div>
               )}
             </div>
           ))}
-          {isLoading && <div className="text-center">Loading...</div>}
+          {isLoading && (
+            <div className="flex justify-center items-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-500"></div>
+            </div>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="flex-none border-t p-4">
@@ -144,11 +235,12 @@ const JourneyUI: React.FC = () => {
               onChange={(e) => setUserInput(e.target.value)}
               placeholder="Ask anything..."
               className="flex-1 border rounded-full px-4 py-2"
+              disabled={isLoading}
             />
             <button 
               type="submit" 
-              disabled={!userInput.trim()}
-              className="bg-green-500 text-white px-4 py-2 rounded-full disabled:opacity-50"
+              disabled={!userInput.trim() || isLoading}
+              className="bg-green-500 text-white px-4 py-2 rounded-full disabled:opacity-50 hover:bg-green-600"
             >
               Send
             </button>
