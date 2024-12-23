@@ -1,0 +1,10 @@
+.vercel
+__pycache__
+*.pyc
+venv
+.env
+.env.local
+.git
+.gitignore
+.pytest_cache
+node_modules
