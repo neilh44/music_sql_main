@@ -3,7 +3,6 @@ from flask import Flask, request, jsonify
 import pandas as pd
 from dotenv import load_dotenv
 from llm_service import LLMService
-from ai_assistant import AIAssistant
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
