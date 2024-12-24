@@ -8,6 +8,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from flask_cors import CORS
+from followup_generator import FollowUpQuestionGenerator
 
 # Set up Flask app
 app = Flask(__name__)

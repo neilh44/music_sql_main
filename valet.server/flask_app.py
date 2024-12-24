@@ -7,6 +7,8 @@ from typing import Dict, Any, Optional
 from dotenv import load_dotenv
 from flask_cors import CORS
 from nl_converter import NLConverter  # Ensure you have this import
+from followup_generator import FollowUpQuestionGenerator
+import json 
 
 
 # Import your custom classes
@@ -77,8 +79,10 @@ except Exception as e:
     logger.error(f"Error initializing services: {str(e)}")
     raise
     
-    # Initialize the follow-up question generator
-    followup_generator = FollowUpQuestionGenerator()
+    # Initialize services globally
+    data_analyzer = ParkingDataAnalyzer()
+    question_generator = LLMQuestionGenerator(api_key=GROQ_API_KEY)
+    context_manager = ContextManager()
 
 def process_query_results(query_result: dict, natural_query: str, conversation_context: list) -> dict:
     """
@@ -208,7 +212,7 @@ def process_query():
             return jsonify({
                 "success": False,
                 "error": f"SQL conversion failed: {sql_result['error']}"
-            }), 500
+            }), 
 
         # Execute query
         query_result = llm_service.execute_query(sql_result["query"])
@@ -314,16 +318,10 @@ def clear_context():
         "session_id": session_id
     })
 
-@app.route("/followup-questions", methods=["POST"])
+@app.route("/followup", methods=["POST"])
 def get_followup_questions():
     """
-    Generate follow-up questions based on session context and previous query
-    
-    Expected JSON body:
-    {
-        "session_id": "session identifier",
-        "current_query": "optional - current query for more context"
-    }
+    Generate follow-up questions using LLM based on session context and current query
     """
     try:
         request_data = request.get_json()
@@ -335,59 +333,77 @@ def get_followup_questions():
             }), 400
 
         session_id = request_data["session_id"]
-        current_query = request_data.get("current_query", "")
+        current_query = request_data.get("query", "")
 
         # Get conversation context
         conversation_context = context_manager.get_context(session_id)
         
-        if not conversation_context:
-            return jsonify({
-                "success": True,
-                "followup_questions": [
-                    "What information would you like to know about parking?",
-                    "Would you like to check parking spot availability?",
-                    "Should we look at parking rates and fees?",
-                    "Would you like to see parking trends or patterns?"
-                ]
-            })
-
-        # Get the most recent query and results from context
+        # Get the most recent results from context
         latest_interaction = conversation_context[-1] if conversation_context else {}
-        previous_query = latest_interaction.get("query", "")
-        previous_results = latest_interaction.get("results", [])
+        results = latest_interaction.get("results", [])
 
-        # Generate follow-up questions
-        followup_generator = FollowUpQuestionGenerator()
-        followup_questions = followup_generator.generate_followup_questions(
-            current_query=current_query or previous_query,
+        # Generate follow-up questions using the generator
+        followup_generator = FollowUpQuestionGenerator(api_key=GROQ_API_KEY)
+        
+        # Prepare prompt and context
+        prompt = followup_generator.prepare_llm_prompt(
+            current_query=current_query,
             conversation_context=conversation_context,
-            results=previous_results
+            results=results
         )
 
-        # Add special follow-ups based on context length
-        if len(conversation_context) > 1:
-            comparison_question = "Would you like to compare this with your previous queries?"
-            trend_question = "Should we analyze trends across your recent queries?"
+        # Call LLM synchronously
+        completion = followup_generator.client.chat.completions.create(
+            model=followup_generator.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant generating follow-up questions for a parking management system. Generate natural, contextually relevant questions that help users explore the data and discover insights."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.7,
+            max_tokens=300
+        )
+
+        # Parse response
+        try:
+            questions = json.loads(completion.choices[0].message.content)
             
-            if comparison_question not in followup_questions:
-                followup_questions.append(comparison_question)
-            if trend_question not in followup_questions:
-                followup_questions.append(trend_question)
+            # Validate and clean questions
+            if not isinstance(questions, list):
+                raise ValueError("LLM response is not a list")
+                
+            questions = [
+                str(q).strip() 
+                for q in questions 
+                if isinstance(q, (str, int, float))
+            ]
+            
+            # Ensure exactly 4 questions
+            while len(questions) < 4:
+                questions.append(followup_generator._get_fallback_question())
+            questions = questions[:4]
+            
+        except json.JSONDecodeError:
+            questions = followup_generator._get_fallback_questions()
 
         return jsonify({
             "success": True,
             "session_id": session_id,
-            "followup_questions": followup_questions,
-            "context_based": bool(conversation_context),
-            "previous_query": previous_query if previous_query else None
+            "followup_questions": questions,
+            "context_used": bool(conversation_context)
         })
 
     except Exception as e:
-        logger.error(f"Error generating follow-up questions: {str(e)}", exc_info=True)
+        logger.error(f"Error generating follow-up questions: {str(e)}")
         return jsonify({
             "success": False,
             "error": f"Internal server error: {str(e)}"
-        }), 500
+        }), 
 
 @app.route("/context/export", methods=["GET"])
 def export_context():
