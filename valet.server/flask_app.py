@@ -76,6 +76,9 @@ try:
 except Exception as e:
     logger.error(f"Error initializing services: {str(e)}")
     raise
+    
+    # Initialize the follow-up question generator
+    followup_generator = FollowUpQuestionGenerator()
 
 def process_query_results(query_result: dict, natural_query: str, conversation_context: list) -> dict:
     """
@@ -160,6 +163,8 @@ try:
 except Exception as e:
     logger.error(f"Error initializing services: {str(e)}")
     raise
+
+
 
 @app.route("/query", methods=["POST"])
 def process_query():
@@ -308,6 +313,81 @@ def clear_context():
         "message": "Context cleared successfully",
         "session_id": session_id
     })
+
+@app.route("/followup-questions", methods=["POST"])
+def get_followup_questions():
+    """
+    Generate follow-up questions based on session context and previous query
+    
+    Expected JSON body:
+    {
+        "session_id": "session identifier",
+        "current_query": "optional - current query for more context"
+    }
+    """
+    try:
+        request_data = request.get_json()
+        
+        if not request_data or "session_id" not in request_data:
+            return jsonify({
+                "success": False,
+                "error": "Missing required 'session_id' field"
+            }), 400
+
+        session_id = request_data["session_id"]
+        current_query = request_data.get("current_query", "")
+
+        # Get conversation context
+        conversation_context = context_manager.get_context(session_id)
+        
+        if not conversation_context:
+            return jsonify({
+                "success": True,
+                "followup_questions": [
+                    "What information would you like to know about parking?",
+                    "Would you like to check parking spot availability?",
+                    "Should we look at parking rates and fees?",
+                    "Would you like to see parking trends or patterns?"
+                ]
+            })
+
+        # Get the most recent query and results from context
+        latest_interaction = conversation_context[-1] if conversation_context else {}
+        previous_query = latest_interaction.get("query", "")
+        previous_results = latest_interaction.get("results", [])
+
+        # Generate follow-up questions
+        followup_generator = FollowUpQuestionGenerator()
+        followup_questions = followup_generator.generate_followup_questions(
+            current_query=current_query or previous_query,
+            conversation_context=conversation_context,
+            results=previous_results
+        )
+
+        # Add special follow-ups based on context length
+        if len(conversation_context) > 1:
+            comparison_question = "Would you like to compare this with your previous queries?"
+            trend_question = "Should we analyze trends across your recent queries?"
+            
+            if comparison_question not in followup_questions:
+                followup_questions.append(comparison_question)
+            if trend_question not in followup_questions:
+                followup_questions.append(trend_question)
+
+        return jsonify({
+            "success": True,
+            "session_id": session_id,
+            "followup_questions": followup_questions,
+            "context_based": bool(conversation_context),
+            "previous_query": previous_query if previous_query else None
+        })
+
+    except Exception as e:
+        logger.error(f"Error generating follow-up questions: {str(e)}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": f"Internal server error: {str(e)}"
+        }), 500
 
 @app.route("/context/export", methods=["GET"])
 def export_context():
