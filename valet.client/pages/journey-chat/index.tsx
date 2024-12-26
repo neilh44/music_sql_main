@@ -1,7 +1,6 @@
-// JourneyUI/index.tsx
 import React, { useState, useRef, useEffect } from "react";
 import DataVisualization from "@/components/ui/DataVisualization";
-
+import FollowUpQuestions from "@/components/ui/FollowUpQuestions";
 
 interface ChatMessage {
   id: number;
@@ -25,6 +24,7 @@ interface BackendResponse {
     has_visualizations: boolean;
   };
   sql_query?: string;
+  followup_questions?: string[];
 }
 
 const JourneyUI: React.FC = () => {
@@ -34,9 +34,10 @@ const JourneyUI: React.FC = () => {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [followUpQuestions, setFollowUpQuestions] = useState<string[]>([]);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
-  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://valet-server-lqdsoabfv-neilh44s-projects.vercel.app';
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000/';
   
   useEffect(() => {
     const storedSessionId = localStorage.getItem('querySessionId');
@@ -58,9 +59,33 @@ const JourneyUI: React.FC = () => {
     };
   };
 
+  const fetchFollowUpQuestions = async (query: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/followup`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          query: query
+        }),
+      });
+
+      const data = await response.json();
+      if (data.success && data.followup_questions) {
+        setFollowUpQuestions(data.followup_questions);
+      }
+    } catch (error) {
+      console.error('Error fetching follow-up questions:', error);
+      setFollowUpQuestions([]);
+    }
+  };
+
   const callBackendAPI = async (userInput: string) => {
     setIsLoading(true);
     setError(null);
+    setFollowUpQuestions([]); // Clear previous follow-up questions
     
     const userMessage: ChatMessage = {
       id: Date.now(),
@@ -105,6 +130,10 @@ const JourneyUI: React.FC = () => {
         responseData: data
       };
       setChatHistory(prev => [...prev, systemMessage]);
+
+      // Fetch follow-up questions after successful response
+      await fetchFollowUpQuestions(userInput);
+      
     } catch (error: any) {
       const errorResponse = handleApiError(error);
       const errorMessage: ChatMessage = {
@@ -145,6 +174,7 @@ const JourneyUI: React.FC = () => {
       setResponseData(null);
       setChatHistory([]);
       setError(null);
+      setFollowUpQuestions([]);
     } catch (error: any) {
       handleApiError(error);
     } finally {
@@ -158,6 +188,11 @@ const JourneyUI: React.FC = () => {
       await callBackendAPI(userInput);
       setUserInput("");
     }
+  };
+
+  const handleFollowUpClick = (question: string) => {
+    setUserInput(question);
+    callBackendAPI(question);
   };
 
   const transformDataForVisualization = (message: ChatMessage) => {
@@ -209,11 +244,18 @@ const JourneyUI: React.FC = () => {
                 </div>
               </div>
               
-              {message.type === 'system' && message.responseData && (
+              {message.type === 'system' && (
                 <div className="mt-4">
-                  {transformDataForVisualization(message) && (
+                  {message.responseData && transformDataForVisualization(message) && (
                     <DataVisualization 
                       data={transformDataForVisualization(message)!}
+                    />
+                  )}
+                  {followUpQuestions.length > 0 && (
+                    <FollowUpQuestions
+                      questions={followUpQuestions}
+                      onQuestionClick={handleFollowUpClick}
+                      className="max-w-2xl mx-auto"
                     />
                   )}
                 </div>

@@ -320,9 +320,7 @@ def clear_context():
 
 @app.route("/followup", methods=["POST"])
 def get_followup_questions():
-    """
-    Generate follow-up questions using LLM based on session context and current query
-    """
+    """Generate follow-up questions using LLM based on session context and current query"""
     try:
         request_data = request.get_json()
         
@@ -343,7 +341,7 @@ def get_followup_questions():
         results = latest_interaction.get("results", [])
 
         # Generate follow-up questions using the generator
-        followup_generator = FollowUpQuestionGenerator(api_key=GROQ_API_KEY)
+        followup_generator = FollowUpQuestionGenerator(api_key=GROQ_API_KEY, db_path=DB_PATH)
         
         # Prepare prompt and context
         prompt = followup_generator.prepare_llm_prompt(
@@ -354,11 +352,13 @@ def get_followup_questions():
 
         # Call LLM synchronously
         completion = followup_generator.client.chat.completions.create(
-            model=followup_generator.model,
+            model="llama3-8b-8192",  # Using a specific model
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a helpful assistant generating follow-up questions for a parking management system. Generate natural, contextually relevant questions that help users explore the data and discover insights."
+                    "content": """You are a helpful assistant generating follow-up questions for a parking management system. 
+                    Always respond with a JSON array of exactly 4 questions that are relevant to the current query and context.
+                    Focus on exploring different aspects of the query subject and suggesting related analyses."""
                 },
                 {
                     "role": "user",
@@ -369,41 +369,57 @@ def get_followup_questions():
             max_tokens=300
         )
 
-        # Parse response
+        # Get response content
+        response_content = completion.choices[0].message.content
+        
+        # Log the raw response for debugging
+        followup_generator.logger.info(f"LLM Raw Response: {response_content}")
+
         try:
-            questions = json.loads(completion.choices[0].message.content)
+            questions = json.loads(response_content)
             
             # Validate and clean questions
             if not isinstance(questions, list):
-                raise ValueError("LLM response is not a list")
+                followup_generator.logger.error(f"LLM response is not a list: {response_content}")
+                questions = followup_generator._get_fallback_questions()
+            else:
+                questions = [
+                    str(q).strip() 
+                    for q in questions 
+                    if isinstance(q, (str, int, float))
+                ]
                 
-            questions = [
-                str(q).strip() 
-                for q in questions 
-                if isinstance(q, (str, int, float))
-            ]
+                # Ensure exactly 4 questions
+                while len(questions) < 4:
+                    questions.append(followup_generator._get_fallback_question())
+                questions = questions[:4]
             
-            # Ensure exactly 4 questions
-            while len(questions) < 4:
-                questions.append(followup_generator._get_fallback_question())
-            questions = questions[:4]
-            
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            followup_generator.logger.error(f"Failed to parse LLM response as JSON: {str(e)}\nResponse: {response_content}")
             questions = followup_generator._get_fallback_questions()
 
         return jsonify({
             "success": True,
             "session_id": session_id,
             "followup_questions": questions,
-            "context_used": bool(conversation_context)
+            "context_used": bool(conversation_context),
+            "debug_info": {
+                "raw_llm_response": response_content,
+                "prompt_used": prompt
+            }
         })
 
     except Exception as e:
-        logger.error(f"Error generating follow-up questions: {str(e)}")
+        logger.error(f"Error generating follow-up questions: {str(e)}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": f"Internal server error: {str(e)}"
-        }), 
+            "error": f"Internal server error: {str(e)}",
+            "debug_info": {
+                "error_type": type(e).__name__,
+                "error_details": str(e)
+            }
+        }), 500
+
 
 @app.route("/context/export", methods=["GET"])
 def export_context():
