@@ -38,7 +38,6 @@ ENV/
 *.log
 
 # Database
-*.db
 *.sqlite3
 
 # Vercel
