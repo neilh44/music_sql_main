@@ -37,7 +37,7 @@ const JourneyUI: React.FC = () => {
   const [followUpQuestions, setFollowUpQuestions] = useState<string[]>([]);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
-  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://parking-valet-context.onrender.com';
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000';
   
   useEffect(() => {
     const storedSessionId = localStorage.getItem('querySessionId');
